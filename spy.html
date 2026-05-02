@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Шпион · онлайн · работает без настроек</title>
+    <style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{background:#0e1e12;font-family:system-ui;padding:20px}
+        .card{max-width:700px;margin:auto;background:#07150bb3;backdrop-filter:blur(10px);border-radius:56px;padding:24px;border:2px solid #e0aa3a}
+        h1{text-align:center;color:#ffeaac}
+        .link-box{background:#00000066;border-radius:40px;padding:12px;margin:15px 0;word-wrap:break-word}
+        button{background:#dd9f3c;border:none;padding:12px 18px;border-radius:40px;font-weight:bold;margin:8px 6px;cursor:pointer}
+        .players{display:flex;flex-wrap:wrap;gap:12px;margin:20px 0}
+        .player{background:#2f4a2b;padding:8px 20px;border-radius:40px;color:#fceabb}
+        .word{font-size:2rem;text-align:center;margin:20px;font-weight:800;font-family:monospace;color:#ffdb8e}
+        .hidden{display:none}
+        .status{padding:8px;background:#00000055;border-radius:70px;text-align:center}
+    </style>
+</head>
+<body>
+<div class="card" id="app">
+    <h1>🕵️‍♂️ Шпион · облачная игра</h1>
+    <div id="hostView">
+        <div class="link-box">🔗 Ваша ссылка: <span id="roomLink"></span><br><button id="copyLinkBtn">📋 Копировать</button></div>
+        <div id="playersList" class="players"></div>
+        <div><button id="startGameBtn">🎲 Начать раунд</button> <button id="revealGameBtn">🔍 Раскрыть слово</button></div>
+        <div id="currentWord" class="word">—</div>
+        <div id="gameStatus" class="status">⚙️ Ожидание игроков</div>
+    </div>
+    <div id="playerView" class="hidden">
+        <div id="roleLabel" style="font-size:1.6rem;font-weight:bold;text-align:center">🔍</div>
+        <div id="wordBlock" class="word">❓</div>
+        <button id="readyButton">✅ Я готов</button>
+        <button id="confessButton">🤫 Я шпион</button>
+        <div id="infoMsg" class="status">Готов? Нажми "Я готов"</div>
+    </div>
+</div>
+<script>
+    // ---- ИСПОЛЬЗУЕМ ПУБЛИЧНЫЙ API ДЛЯ СИНХРОНИЗАЦИИ (mockapi.io) ----
+    const API_BASE = 'https://67238b34493fac3cf24c2f33.mockapi.io/spy/v1/room';
+    let roomId = localStorage.getItem('spyRoom');
+    if(!roomId){ roomId = Math.random().toString(36).substring(2,10); localStorage.setItem('spyRoom', roomId); }
+    let isHost = !window.location.search.includes('player=1');
+    let playerId = localStorage.getItem('playerId');
+    if(!playerId){ playerId = 'p_'+Math.random().toString(36).substring(2,8); localStorage.setItem('playerId',playerId); }
+    let playerName = localStorage.getItem('playerName');
+    if(!playerName){ playerName = prompt("Ваше имя:","Агент") || "Агент"; localStorage.setItem('playerName',playerName);}
+    let interval;
+
+    async function syncRoom(data) {
+        try{
+            await fetch(`${API_BASE}/${roomId}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+        }catch(e){}
+    }
+    async function loadRoom() {
+        try{
+            let res = await fetch(`${API_BASE}/${roomId}`);
+            if(!res.ok){
+                if(res.status===404){
+                    await fetch(`${API_BASE}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:roomId, players:{}, gameState:{} }) });
+                    return { players:{}, gameState:{} };
+                }
+                return { players:{}, gameState:{} };
+            }
+            return await res.json();
+        }catch(e){ return { players:{}, gameState:{} }; }
+    }
+
+    async function updateUI(){
+        let room = await loadRoom();
+        let players = room.players || {};
+        let game = room.gameState || {};
+        if(isHost){
+            const container = document.getElementById('playersList');
+            let playersArr = Object.values(players).filter(p=>p.name);
+            if(playersArr.length===0) container.innerHTML = '<span>✨ Игроки появятся после перехода по ссылке</span>';
+            else container.innerHTML = playersArr.map(p=>`<div class="player">${p.name} ${p.ready?'✅':'⏳'}</div>`).join('');
+            if(game.active){
+                document.getElementById('currentWord').innerHTML = game.word || '???';
+                document.getElementById('gameStatus').innerHTML = `🎲 Раунд идёт! Шпион: ${game.spyName || '?'}`;
+            }else{
+                document.getElementById('currentWord').innerHTML = '—';
+                document.getElementById('gameStatus').innerHTML = '⚙️ Ожидание старта';
+            }
+        }else{
+            let myData = players[playerId] || {};
+            let roundData = game.active ? game : null;
+            if(roundData && roundData.active){
+                let isSpy = (roundData.spyId === playerId);
+                if(isSpy){
+                    document.getElementById('roleLabel').innerHTML = '🕵️‍♂️ ВЫ — ШПИОН!';
+                    document.getElementById('wordBlock').innerHTML = '❓ ❓ ❓';
+                    document.getElementById('infoMsg').innerHTML = 'Задавайте вопросы. Если уверены — нажмите "Я шпион"';
+                }else{
+                    document.getElementById('roleLabel').innerHTML = '🔍 Агент';
+                    document.getElementById('wordBlock').innerHTML = roundData.word || '???';
+                    document.getElementById('infoMsg').innerHTML = `Слово: ${roundData.word}`;
+                }
+            }else{
+                document.getElementById('roleLabel').innerHTML = '🎭 Ожидание';
+                document.getElementById('wordBlock').innerHTML = '❓';
+                document.getElementById('infoMsg').innerHTML = 'Нажмите "Я готов" до начала раунда';
+            }
+        }
+    }
+
+    if(isHost){
+        document.getElementById('hostView').style.display='block';
+        document.getElementById('playerView').style.display='none';
+        const link = window.location.href.split('?')[0] + '?player=1';
+        document.getElementById('roomLink').innerText = link;
+        document.getElementById('copyLinkBtn').onclick = ()=>{ navigator.clipboard.writeText(link); alert('Ссылка скопирована'); };
+        document.getElementById('startGameBtn').onclick = async () => {
+            let room = await loadRoom();
+            let players = room.players || {};
+            let readyPlayers = Object.values(players).filter(p=>p.ready);
+            if(readyPlayers.length<3){ alert(`Нужно минимум 3 игрока (готовы ${readyPlayers.length})`); return; }
+            const words = ["Аэропорт","Вокзал","Метро","Космодром","Заброшенная больница","Банк","Школа","Гостиница","Остров","Цирк","Тюрьма","Станция"];
+            const word = words[Math.floor(Math.random()*words.length)];
+            let ids = Object.keys(players);
+            let spyId = ids[Math.floor(Math.random()*ids.length)];
+            let spyName = players[spyId]?.name || "Шпион";
+            await syncRoom({ players, gameState: { active:true, word, spyId, spyName } });
+            updateUI();
+        };
+        document.getElementById('revealGameBtn').onclick = async () => {
+            let room = await loadRoom();
+            let game = room.gameState || {};
+            alert(`Слово раунда: ${game.word || 'неизвестно'}  Шпион: ${game.spyName || '?'}`);
+            await syncRoom({ players: room.players || {}, gameState: { active:false } });
+            updateUI();
+        };
+        setInterval(updateUI, 1500);
+    }else{
+        document.getElementById('hostView').style.display='none';
+        document.getElementById('playerView').style.display='block';
+        (async () => {
+            let room = await loadRoom();
+            let players = room.players || {};
+            if(!players[playerId]) players[playerId] = { name:playerName, ready:false };
+            await syncRoom({ players, gameState: room.gameState || {} });
+            updateUI();
+        })();
+        document.getElementById('readyButton').onclick = async () => {
+            let room = await loadRoom();
+            let players = room.players || {};
+            if(players[playerId]) players[playerId].ready = true;
+            await syncRoom({ players, gameState: room.gameState || {} });
+            alert("Вы готовы! Ждите начала.");
+        };
+        document.getElementById('confessButton').onclick = async () => {
+            let room = await loadRoom();
+            let game = room.gameState || {};
+            if(game.active && game.spyId === playerId){
+                alert("🕵️ Шпион признал себя! Победа шпиона!");
+                await syncRoom({ players: room.players || {}, gameState: { active:false } });
+            }else{
+                alert("Вы не шпион! Продолжайте помогать агентам.");
+            }
+            updateUI();
+        };
+        setInterval(updateUI, 1500);
+    }
+    updateUI();
+</script>
+</body>
+</html>
